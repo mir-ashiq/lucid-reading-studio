@@ -111,6 +111,12 @@ select.tool{appearance:auto}
 
 /* saved words list */
 .saved-list .item{display:flex;justify-content:space-between;align-items:center;padding:.4rem 0;border-bottom:1px dashed var(--line);font-size:.9rem}
+.comp-opts{display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.5rem}
+.comp-opts .chip:disabled{opacity:.45;cursor:default}
+#compFb{margin-top:.5rem;font-size:.8rem;min-height:1.2rem;font-weight:700}
+#compFb.good{color:#0E7C7B}
+#compFb.bad{color:var(--warn)}
+#wpmChart{display:block}
 .saved-list .item button{background:none;border:none;cursor:pointer;color:var(--warn);font-size:.85rem}
 
 /* focus line controls */
@@ -345,7 +351,23 @@ placeholder="Paste any text here — an article, homework, story… then press A
         <div class="saved-list" id="savedList">
           <p class="hint">Words you train are saved here (in your browser only). Tap one to drill it again.</p>
         </div>
-        <button class="btn ghost sm" id="btnExport" style="margin-top:.7rem">⬇ Export my words</button>
+        <div style="margin-top:.7rem;display:flex;gap:.5rem;flex-wrap:wrap">
+          <button class="btn ghost sm" id="btnExport">⬇ CSV</button>
+          <button class="btn ghost sm" id="btnBackup">⬇ Backup progress</button>
+          <button class="btn ghost sm" id="btnRestore">⬆ Restore</button>
+          <input type="file" id="fileRestore" accept="application/json,.json" hidden>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h3>Comprehension check</h3>
+        <p class="hint">Auto-built from your text — fill in the missing word. Practice feedback, not an assessment.</p>
+        <button class="btn sm" id="btnComp" style="margin-top:.6rem">✅ Check my understanding</button>
+        <div id="compBox" hidden style="margin-top:.7rem">
+          <div id="compQ" style="font-size:.95rem;line-height:1.6"></div>
+          <div id="compOpts" class="comp-opts" role="group" aria-label="answer options"></div>
+          <div class="fb" id="compFb" aria-live="polite"></div>
+        </div>
       </div>
 
       <div class="panel">
@@ -356,6 +378,12 @@ placeholder="Paste any text here — an article, homework, story… then press A
           <div class="sess-cell"><b id="psDrills">0</b><span>drills finished</span></div>
           <div class="sess-cell"><b id="psRight">0%</b><span>syl·la·bles right</span></div>
         </div>
+        <div style="margin-top:.8rem">
+          <button class="btn sm" id="btnPace">⏱ Start pace timer</button>
+          <span id="paceOut" class="hint" style="margin-left:.5rem"></span>
+        </div>
+        <canvas id="wpmChart" width="260" height="46" style="margin-top:.6rem;max-width:100%" aria-hidden="true"></canvas>
+        <p class="hint" id="wpmStat" style="margin:.3rem 0 0"></p>
         <div class="sess-foot"><span>Counts this visit — evidence of use, not a score.</span><button class="btn ghost sm" id="btnResetStats">reset</button></div>
       </div>
 
@@ -921,10 +949,21 @@ function renderDrill(){
   if (q.step >= q.order.length){
     const good = q.results.filter(Boolean).length;
     const perfect = good === q.order.length;
+    // error-pattern feedback: which position of the word slipped?
+    const len = q.syl.length;
+    const missPos = q.results.map((ok, i)=> ok ? null : q.order[i].i).filter(p=> p !== null);
+    let pattern = "";
+    if (missPos.length){
+      const starts = missPos.filter(p=> p === 0).length;
+      const ends = missPos.filter(p=> p === len-1).length;
+      const mids = missPos.length - starts - ends;
+      const worst = Math.max(starts, mids, ends);
+      pattern = " Watch the " + (worst === starts ? "first chunk" : worst === ends ? "word ending" : "middle chunks") + " — that's where the slips happened.";
+    }
     $("quizSlots").textContent = q.word;
-    $("quizFb").textContent = (perfect ? "🎉 Mastered — " : "Done! ") + good + "/" + q.order.length + " syllables correct." + (perfect ? " Saved to My words." : " Try it again to master it.");
+    $("quizFb").textContent = (perfect ? "🎉 Mastered — " : "Done! ") + good + "/" + len + " syllables correct." + (perfect ? " Saved — review scheduled." : " Try it again.") + pattern;
     $("quizFb").className = "fb good";
-    saveWord(q.word);
+    saveWord(q.word, perfect);
     sess.drills++; renderSess();
     $("quizIn").value = "";
     return;
@@ -955,30 +994,58 @@ $("quizIn").addEventListener('keydown', e=>{
 });
 $("btnDrill").onclick = ()=> startDrill($("wHead").textContent);
 
-/* ---------- saved words (localStorage) with mastery levels ---------- */
+/* ---------- saved words (localStorage): mastery + spaced review ---------- */
+const SRS_DAYS = [1, 3, 7, 14];   // review intervals (days) after each drill
 function masteryLabel(n){
   if (n >= 3) return {t:"mastered", c:"#0E7C7B"};
   if (n === 2) return {t:"practicing", c:"#D4875A"};
   return {t:"learning", c:"#6B6459"};
 }
-function saveWord(w){
-  state.saved[w] = (state.saved[w] || 0) + 1;
-  localStorage.setItem('lucid_words', JSON.stringify(state.saved));
+function loadSaved(){
+  try {
+    const raw = JSON.parse(localStorage.getItem('lucid_words') || '{}');
+    let migrated = false;
+    for (const k of Object.keys(raw)){
+      const v = raw[k];
+      if (typeof v === 'number'){ raw[k] = { n: v, due: 0 }; migrated = true; }  // old counts -> schedule objects
+      else raw[k] = { n: v.n|0, due: v.due|0 };
+    }
+    state.saved = raw;
+    if (migrated) localStorage.setItem('lucid_words', JSON.stringify(raw));      // persist the new schema once
+  } catch(e){ state.saved = {}; }
+}
+function whenStr(ts){
+  const d = Math.ceil((ts - Date.now()) / 864e5);
+  if (d <= 0) return "now";
+  if (d === 1) return "tomorrow";
+  return "in " + d + " days";
+}
+function saveWord(w, perfect){
+  const e = state.saved[w] || { n: 0, due: 0 };
+  e.n++;
+  e.due = Date.now() + (perfect ? SRS_DAYS[Math.min(e.n-1, SRS_DAYS.length-1)] : 1) * 864e5;
+  state.saved[w] = e;
+  try { localStorage.setItem('lucid_words', JSON.stringify(state.saved)); } catch(err){}
   renderSaved();
-  const m = masteryLabel(state.saved[w]);
-  toast(state.saved[w] >= 3 ? "🎉 “" + w + "” mastered!" : "Saved “" + w + "” — " + m.t);
+  const m = masteryLabel(e.n);
+  toast(e.n >= 3 ? "🎉 '" + w + "' mastered — review " + whenStr(e.due)
+                 : "Saved '" + w + "' — " + m.t + ", review " + whenStr(e.due));
 }
 function renderSaved(){
   const keys = Object.keys(state.saved);
-  $("savedCount").textContent = keys.length ? "(" + keys.length + ")" : "";
+  const due = keys.filter(w => state.saved[w].due && state.saved[w].due <= Date.now());
+  $("savedCount").textContent = keys.length ? "(" + keys.length + (due.length ? " · " + due.length + " due" : "") + ")" : "";
   if (!keys.length){
-    $("savedList").innerHTML = `<p class="hint">Words you train are saved here (in your browser only). Tap one to drill it again — drill it three times to master it.</p>`;
+    $("savedList").innerHTML = `<p class="hint">Words you train are saved here (in your browser only). Tap one to drill it again — drills come back on a spaced schedule: tomorrow, in 3, 7 and 14 days.</p>`;
     return;
   }
-  $("savedList").innerHTML = keys.sort().map(w=>{
-    const m = masteryLabel(state.saved[w]);
-    return `<div class="item"><button class="chip" data-w="${esc(w)}" style="border:1.5px solid ${m.c};color:${m.c};background:none;font-size:.95rem;cursor:pointer">${esc(w)}</button>
-     <span style="display:flex;gap:.4rem;align-items:center"><span class="hint" style="margin:0;color:${m.c};font-weight:700">${m.t} ×${state.saved[w]}</span>
+  const order = keys.sort((a,b)=> (state.saved[a].due <= Date.now() ? 0 : 1) - (state.saved[b].due <= Date.now() ? 0 : 1) || state.saved[a].due - state.saved[b].due);
+  $("savedList").innerHTML = order.map(w=>{
+    const e = state.saved[w], m = masteryLabel(e.n);
+    const isDue = e.due && e.due <= Date.now();
+    return `<div class="item"><button class="chip" data-w="${esc(w)}" style="border:1.5px solid ${m.c};color:${m.c};background:none;font-size:.95rem;cursor:pointer${isDue ? ';box-shadow:0 0 0 2px var(--warm)':''}">${esc(w)}${isDue ? " ⏰" : ""}</button>
+     <span style="display:flex;gap:.4rem;align-items:center"><span class="hint" style="margin:0;color:${m.c};font-weight:700">${m.t} ×${e.n}</span>
+     <span class="hint" style="margin:0">↻ ${e.due ? whenStr(e.due) : "—"}</span>
      <button data-del="${esc(w)}" aria-label="remove ${esc(w)}" style="color:var(--warn)">✕</button></span></div>`;
   }).join("");
   $("savedList").querySelectorAll('[data-w]').forEach(b=> b.onclick = ()=>{ openWord(b.dataset.w, null); startDrill(b.dataset.w); });
@@ -987,13 +1054,44 @@ function renderSaved(){
 $("btnExport").onclick = ()=>{
   const keys = Object.keys(state.saved).sort();
   if (!keys.length){ toast("No saved words yet"); return; }
-  const csv = "word,times_drilled\n" + keys.map(w=>w + "," + state.saved[w]).join("\n");
+  const csv = "word,times_drilled,next_review\n" + keys.map(w=>{
+    const e = state.saved[w];
+    return w + "," + e.n + "," + (e.due ? new Date(e.due).toISOString().slice(0,10) : "");
+  }).join("\n");
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([csv], {type:'text/csv'}));
   a.download = 'my-lucid-words.csv';
   a.click();
   toast("Exported " + keys.length + " words");
 };
+
+/* ---------- backup / restore all progress (JSON) ---------- */
+$("btnBackup").onclick = ()=>{
+  const data = { app: "lucid-reading-studio", version: 1, saved: state.saved, wpm: loadWpm(), theme: localStorage.getItem('lucid_theme') || "light", exported: new Date().toISOString() };
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(data, null, 1)], {type:'application/json'}));
+  a.download = 'lucid-progress-backup.json';
+  a.click();
+  toast("Backup downloaded — keep it safe");
+};
+$("fileRestore").addEventListener('change', e=>{
+  const f = e.target.files[0];
+  if (!f) return;
+  const r = new FileReader();
+  r.onload = ()=>{
+    try {
+      const data = JSON.parse(r.result);
+      if (data.app !== "lucid-reading-studio" || typeof data.saved !== "object") throw 0;
+      for (const k of Object.keys(data.saved)) state.saved[k] = data.saved[k];   // merge
+      localStorage.setItem('lucid_words', JSON.stringify(state.saved));
+      if (Array.isArray(data.wpm)) saveWpm(data.wpm.concat(loadWpm()).slice(-60));
+      renderSaved(); renderWpm();
+      toast("Progress restored: " + Object.keys(data.saved).length + " words");
+    } catch(err){ toast("That file isn't a Lucid backup"); }
+    e.target.value = "";
+  };
+  r.readAsText(f);
+});
 
 /* ---------- events ---------- */
 $("btnAdapt").onclick = ()=>{
@@ -1169,11 +1267,135 @@ document.addEventListener('keydown', e=>{
 });
 renderSess();
 
+/* ---------- comprehension check: offline auto-cloze from the loaded text ---------- */
+const STOP = new Set("the a an and or but of to in on at for with is was are were be been being this that these those it its as by from he she they we you your i not no have has had do does did will would can could should just very more most some any all when where while which who whom whose what how so than then there here also into over under about after before between during through without within along across behind beyond near off out up down per via".split(" "));
+let comp = null;
+function buildCloze(){
+  const sents = state.text.split(/[.!?]+/).map(s=>s.trim()).filter(s=>s.split(/\s+/).length >= 7);
+  if (sents.length < 3) return null;
+  const textWords = [...new Set((state.text.toLowerCase().match(/[a-z]{4,}/g) || []))];
+  const picks = sents.slice().sort(()=>Math.random()-.5).slice(0, 8);
+  const qs = [];
+  for (const s of picks){
+    const words = s.split(/\s+/);
+    const cands = words.map((w,i)=>({ w: w.toLowerCase().replace(/[^a-z]/g,''), i }))
+                       .filter(o=> o.w.length >= 4 && !STOP.has(o.w));
+    if (!cands.length) continue;
+    const target = cands[Math.floor(Math.random()*cands.length)];
+    const pool = textWords.filter(w=> w !== target.w && Math.abs(w.length - target.w.length) <= 3);
+    const distractors = pool.slice().sort(()=>Math.random()-.5).slice(0, 3);
+    if (distractors.length < 3) continue;
+    qs.push({
+      before: words.slice(0, target.i).join(" "),
+      after:  words.slice(target.i+1).join(" "),
+      answer: target.w,
+      options: [target.w, ...distractors].sort(()=>Math.random()-.5)
+    });
+  }
+  return qs.length >= 3 ? qs.slice(0, 5) : null;
+}
+function renderComp(){
+  if (!comp){ return; }
+  if (comp.i >= comp.qs.length){
+    const pct = Math.round(100 * comp.right / comp.qs.length);
+    $("compQ").textContent = "Done: " + comp.right + " of " + comp.qs.length + " right (" + pct + "%).";
+    $("compOpts").innerHTML = "";
+    $("compFb").textContent = pct >= 80 ? "Strong understanding of this text. ✅"
+                              : pct >= 50 ? "Good grasp — the misses show which sentences deserve a second read."
+                                          : "Worth re-reading with the focus line on — comprehension is practice feedback, not a grade.";
+    $("compFb").className = "fb good";
+    sess.comp = comp.right; renderSess();
+    return;
+  }
+  const q = comp.qs[comp.i];
+  $("compQ").innerHTML = esc(q.before) + ' <b style="color:var(--warm)">____</b> ' + esc(q.after);
+  $("compOpts").innerHTML = q.options.map(o=>`<button class="chip comp-opt" data-o="${esc(o)}" style="border:1.5px solid var(--line);color:inherit;background:none;font-size:.95rem;cursor:pointer">${esc(o)}</button>`).join("");
+  $("compFb").textContent = "Question " + (comp.i+1) + " of " + comp.qs.length;
+  $("compFb").className = "fb";
+  $("compOpts").querySelectorAll(".comp-opt").forEach(b=> b.onclick = ()=>{
+    const ok = b.dataset.o === q.answer;
+    if (ok) comp.right++;
+    $("compFb").textContent = ok ? "✓ Correct." : "✗ It was '" + q.answer + "'.";
+    $("compFb").className = "fb " + (ok ? "good" : "bad");
+    if (ok) speak(q.answer, true);
+    $("compOpts").querySelectorAll(".comp-opt").forEach(x=> x.disabled = true);
+    comp.i++;
+    setTimeout(renderComp, 900);
+  });
+}
+$("btnComp").onclick = ()=>{
+  const qs = buildCloze();
+  if (!qs){ toast("Load a longer text first — comprehension checks need a few sentences"); return; }
+  comp = { qs, i: 0, right: 0 };
+  $("compBox").hidden = false;
+  renderComp();
+};
+
+/* ---------- reading pace: timer + words-per-minute history (localStorage) ---------- */
+let pace = null;
+function loadWpm(){ try { return JSON.parse(localStorage.getItem('lucid_wpm') || '[]') || []; } catch(e){ return []; } }
+function saveWpm(h){ try { localStorage.setItem('lucid_wpm', JSON.stringify(h.slice(-60))); } catch(e){} }
+function textWordCount(){ return (state.text.toLowerCase().match(/[a-z'-]+/g) || []).length; }
+$("btnPace").onclick = ()=>{
+  if (!state.text.trim()){ toast("Load some text first"); return; }
+  if (!pace){
+    pace = { t0: Date.now() };
+    $("btnPace").textContent = "⏱ I finished reading";
+    $("btnPace").classList.add('on');
+    $("paceOut").textContent = "Reading… tap when you reach the end";
+    toast("Timer on — read the adapted page, then tap again");
+    return;
+  }
+  const mins = (Date.now() - pace.t0) / 60000;
+  const wpm = Math.round(textWordCount() / mins);
+  pace = null;
+  $("btnPace").textContent = "⏱ Start pace timer";
+  $("btnPace").classList.remove('on');
+  if (mins < 0.05){ $("paceOut").textContent = "Too quick to measure — read for real 🙂"; return; }
+  const h = loadWpm(); h.push({ d: Date.now(), wpm }); saveWpm(h);
+  renderWpm();
+  $("paceOut").textContent = wpm + " words/min this read";
+  toast("Pace: " + wpm + " wpm — saved to your history");
+};
+function renderWpm(){
+  const h = loadWpm();
+  const c = $("wpmChart"), ctx = c.getContext('2d');
+  ctx.clearRect(0, 0, c.width, c.height);
+  if (!h.length){
+    $("wpmStat").textContent = "No timed reads yet";
+    return;
+  }
+  const dark = document.body.classList.contains('dark');
+  const lo = Math.min(...h.map(x=>x.wpm)) * 0.9, hi = Math.max(...h.map(x=>x.wpm)) * 1.1;
+  const W = c.width - 4, H = c.height - 6;
+  ctx.strokeStyle = dark ? "#7ED8D2" : "#0E7C7B";
+  ctx.lineWidth = 2; ctx.beginPath();
+  h.forEach((x, i)=>{
+    const px = 4 + (h.length === 1 ? W/2 : i * W/(h.length-1));
+    const py = 3 + H - (x.wpm - lo) / (hi - lo || 1) * H;
+    i ? ctx.lineTo(px, py) : ctx.moveTo(px, py);
+  });
+  ctx.stroke();
+  const last = h[h.length-1].wpm, avg = Math.round(h.reduce((a,x)=>a+x.wpm,0)/h.length);
+  $("wpmStat").textContent = "last " + last + " · avg " + avg + " wpm (" + h.length + " timed read" + (h.length>1?"s":"") + ")";
+  c.setAttribute('aria-label', "Reading pace history: last " + last + ", average " + avg + " words per minute");
+}
+
+/* ---------- PWA: installable + true offline when hosted (file:// stays untouched) ---------- */
+if (location.protocol === 'https:'){
+  const l = document.createElement('link');
+  l.rel = 'manifest'; l.href = 'manifest.webmanifest';
+  document.head.appendChild(l);
+  if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(()=>{});
+}
+
 /* ---------- boot ---------- */
 (function init(){
-  try { const s = localStorage.getItem('lucid_words'); if (s) state.saved = JSON.parse(s) || {}; } catch(e){}
+  loadSaved();
+  $("btnRestore").onclick = ()=> $("fileRestore").click();
   $("tSyll").classList.add('on');
   renderSaved();
+  renderWpm();
   // load the science sample by default so the page demos itself
   $("input").value = SAMPLES.science;
   state.text = SAMPLES.science;

@@ -35,9 +35,20 @@ one HTML file, zero dependencies, zero build step, no server.
 - **Word Workshop** — tap any highlighted word: syllable chunks, tappable phoneme
   sounds, a plain-language definition from an offline dictionary, and live
   readability stats (Flesch–Kincaid).
-- **Spelling drill with mastery** — type each missing syllable, hear it spoken back;
-  a perfect run celebrates, and finished drills save to *My Words* with a mastery
-  level (learning → practicing → mastered at ×3). Exportable as CSV, browser-only.
+- **Spelling drill with spaced review** — type each missing syllable, hear it
+  spoken back; finished drills save to *My Words* with a practice-progress
+  level (learning → practicing → mastered) and a **spaced-review schedule**:
+  tomorrow → 3 → 7 → 14 days, with words due for review flagged ⏰ and sorted
+  first. After each drill the app names *where* in the word the slips
+  happened (first chunk / middle / ending). Exportable as CSV, browser-only.
+- **Comprehension check** — auto-builds a 5-question fill-in-the-word quiz
+  from the loaded text, fully offline — framed as practice feedback, not an
+  assessment.
+- **Reading-pace timer** — time a read-through, see words-per-minute and a
+  sparkline of your pace history (all local). Practice tracking, not a
+  diagnosis.
+- **Backup & restore** — one click exports every word, schedule and pace
+  reading as JSON; import restores it on any device.
 - **Engine proof** — press "Run 16 tests" in the app: the live syllabifier verifies
   itself in the page, same suite as `tests.js`. Don't take our word for it.
 - **Session panel** — lines read, words explored, drills finished, syllable accuracy:
@@ -93,11 +104,22 @@ on **8,892 unseen words** (the 10,000 most frequent English words):
   ESC closes the tour, the settings `<dialog>`, and the Word Workshop card;
   ▲▼ keys move the focus line; all icon buttons carry labels; drill and toast
   feedback use `aria-live`.
+- **Every feature exercised in an automated 25-check browser suite**: legacy
+  flows (BA panel, workshop, drill, karaoke, tour, 16/16 in-page tests) plus
+  the new comprehension quiz, spaced-review drill scheduling, pace timer +
+  history, backup wiring, and old-data migration — all green, zero console
+  errors, zero network requests.
+- **PWA offline path**: when hosted, a 40-line service worker (network-first,
+  versioned cache) makes the app work with no connection after first load
+  and installable via `manifest.webmanifest` — while the single-file
+  `file://` build stays untouched.
 
 ## Tech
 
 Single HTML file: vanilla HTML/CSS/JS, Web Speech API (progressive — the app works
-without it), localStorage. Tested in Chromium; responsive to 390px phones.
+without it), localStorage, plus an optional 40-line service worker + web manifest
+for install/offline when hosted. No frameworks, no dependencies, no build step.
+Tested in Chromium; responsive to 390px phones.
 
 ## Honest limits
 
@@ -108,8 +130,11 @@ without it), localStorage. Tested in Chromium; responsive to 390px phones.
   (audit in [`audit/`](audit/), including failure classes). Known weak spots:
   "-ed" endings, unstressed vowels ("business"), short-vowel VCV words
   ("manage"). The exception list grows with real usage.
-- "Mastery" in *My Words* means **practice progress** (three successful drill
-  runs), not a validated learning outcome — we phrase it carefully on purpose.
+- "Mastery" in *My Words* means **practice progress** on a spaced schedule
+  (fixed 1/3/7/14-day intervals, not a full adaptive algorithm), not a validated
+  learning outcome — we phrase it carefully on purpose.
+- The comprehension check is auto-generated cloze from the text itself: useful
+  practice feedback, not a validated reading assessment.
 - Phonemes are rule-based approximations, not IPA-exact transcription.
 - Read-aloud highlighting depends on the browser's voices; it degrades gracefully.
 - Screen-reader support covers core flows (navigation, drill feedback), not full parity.
@@ -120,5 +145,6 @@ Everything in this repo was built during the Nov 21–22, 2026 event window.
 The syllabification engine, all UI, tools, drills, tour, session tracking,
 before/after view, in-app test runner, and read-aloud karaoke were written at the
 hackathon. The unseen-word audit, the silent-e rule it uncovered, and the
-ESC-to-close accessibility fix also happened during the event. No
-pre-existing project code was used.
+ESC-to-close accessibility fix also happened during the event, as did the
+round-two upgrades (spaced review, comprehension check, pace timer, backup /
+restore, service worker + manifest). No pre-existing project code was used.
