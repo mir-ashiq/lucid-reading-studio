@@ -2,23 +2,17 @@
 // extracted from the delivered HTML (kept in sync manually).
 "use strict";
 const V = "aeiouy";
-const isVow = ch => V.includes(ch.toLowerCase());
+function isVow(ch){ return V.includes(ch.toLowerCase()); }
 
-// phonics knowledge: valid syllable onsets (start of a syllable)
 const ONSETS = new Set(["str","spr","scr","spl","thr","chr","phr","shr","squ",
   "tr","dr","pl","bl","cl","gl","fl","sl","sp","st","sc","sk","sm","sn","sw","tw","qu",
   "ch","sh","th","ph","wh","gh","br","cr","gr","fr","pr","kn","wr","gn","ps","rh"]);
-// a coda (end of syllable) can't end with these letters in English
 const CODA_BAD_END = new Set(["h","w","j","q","y"]);
-// curated splits for very common tricky words (transparent exceptions)
 const EXCEPTIONS = {
-  lighthouse: ["light","house"], extraordinary: ["ex","traor","di","nar","y"],
-  through: ["through"], thought: ["thought"], neighbour: ["neigh","bour"],
-  favourite: ["fa","vour","ite"], favorite: ["fa","vor","ite"],
+  lighthouse: ["light","house"], through: ["through"], thought: ["thought"],
+  neighbour: ["neigh","bour"], favourite: ["fa","vour","ite"], favorite: ["fa","vor","ite"],
   because: ["be","cause"], beautiful: ["beau","ti","ful"], knowledge: ["knowl","edge"],
   every: ["ev","ery"], different: ["dif","fer","ent"], evening: ["eve","ning"],
-  area: ["ar","e","a"], idea: ["i","de","a"], real: ["re","al"], create: ["cre","ate"],
-  science: ["sci","ence"], lion: ["li","on"], poem: ["po","em"],
   water: ["wa","ter"], family: ["fam","i","ly"], camera: ["cam","er","a"],
   memory: ["mem","o","ry"], animal: ["an","i","mal"], ocean: ["o","cean"],
   nature: ["na","ture"], picture: ["pic","ture"], question: ["ques","tion"],
@@ -28,13 +22,12 @@ const EXCEPTIONS = {
   comfortable: ["com","for","ta","ble"], together: ["to","ge","ther"],
   instructions: ["in","struc","tions"], photosynthesis: ["pho","to","syn","the","sis"],
   biodiversity: ["bio","di","ver","si","ty"], chloroplasts: ["chlo","ro","plasts"],
-  pancakes: ["pan","cakes"], favourite: ["fa","vour","ite"], sustainable: ["sus","tain","a","ble"]
+  pancakes: ["pan","cakes"]
 };
 
 function splitCluster(cl, wordInitial){
-  // returns [left, right]: left closes the previous syllable, right opens the next
-  if (wordInitial) return ["", cl];          // initial cluster is the onset
-  if (ONSETS.has(cl)) return ["", cl];       // onset maximization
+  if (wordInitial) return ["", cl];
+  if (ONSETS.has(cl)) return ["", cl];
   if (cl.length === 1) return ["", cl];
   let best = null;
   for (let i = 1; i < cl.length; i++){
@@ -64,8 +57,7 @@ function syllabify(word){
     else groups.push({s: bare[i], t});
   }
   const syls = [];
-  let cur = "";      // complete syllable being built
-  let onset = "";    // consonants reserved for the next vowel
+  let cur = "", onset = "";
   for (let i = 0; i < groups.length; i++){
     const g = groups[i];
     if (g.t === 'V'){
@@ -82,12 +74,11 @@ function syllabify(word){
         cur = "";
         onset = right;
       } else {
-        cur += g.s;   // final consonant run stays with previous vowel
+        cur += g.s;
       }
     }
   }
   if (cur || onset) syls.push(cur + onset);
-  // merge lone consonant syllables into the next syllable
   const syls2 = [];
   for (const p of syls){
     if (syls2.length && syls2[syls2.length-1].length === 1 && !isVow(syls2[syls2.length-1])){
@@ -96,11 +87,20 @@ function syllabify(word){
       syls2.push(p);
     }
   }
-  // silent final e merges into previous syllable
   if (syls2.length > 1 && syls2[syls2.length-1] === "e"){
     syls2[syls2.length-2] += "e"; syls2.pop();
   }
-  // merge tiny fragments
+  // magic-e: a final single-consonant+e syllable after a short vowel-final
+  // syllable marks a long vowel (the e is silent), not its own syllable:
+  // "on·li·ne" -> "on·line", "ser·vi·ce" -> "ser·vice" ("-le" stays syllabic)
+  if (syls2.length > 1){
+    const last = syls2[syls2.length-1], prev = syls2[syls2.length-2];
+    const digraphPrev = /^(ch|sh|th|ph|wh)[aeiouy]$/.test(prev);
+    if (/^[bcdfghjkmnpqrstvwz]e$/.test(last) &&
+        (prev.length <= 2 || digraphPrev) && isVow(prev[prev.length-1])){
+      syls2[syls2.length-2] += last; syls2.pop();
+    }
+  }
   const merged = [];
   for (const p of syls2){
     if (merged.length && p.length < 2) merged[merged.length-1] += p;

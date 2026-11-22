@@ -540,6 +540,17 @@ function syllabify(word){
   if (syls2.length > 1 && syls2[syls2.length-1] === "e"){
     syls2[syls2.length-2] += "e"; syls2.pop();
   }
+  // magic-e: a final single-consonant+e syllable after a short vowel-final
+  // syllable marks a long vowel (the e is silent), not its own syllable:
+  // "on·li·ne" -> "on·line", "ser·vi·ce" -> "ser·vice" ("-le" stays syllabic)
+  if (syls2.length > 1){
+    const last = syls2[syls2.length-1], prev = syls2[syls2.length-2];
+    const digraphPrev = /^(ch|sh|th|ph|wh)[aeiouy]$/.test(prev);
+    if (/^[bcdfghjkmnpqrstvwz]e$/.test(last) &&
+        (prev.length <= 2 || digraphPrev) && isVow(prev[prev.length-1])){
+      syls2[syls2.length-2] += last; syls2.pop();
+    }
+  }
   const merged = [];
   for (const p of syls2){
     if (merged.length && p.length < 2) merged[merged.length-1] += p;
@@ -818,6 +829,11 @@ function openWord(word, el){
   if (el) el.style.background = 'var(--focus)';
 }
 $("wclose").onclick = ()=>{ $("wcard").hidden = true; $("wwEmpty").hidden = false; document.querySelectorAll('.w').forEach(n=>n.style.background=''); };
+// ESC also closes the workshop card (but not mid-drill), matching the
+// native <dialog> and tour behaviour for keyboard users
+document.addEventListener('keydown', e=>{
+  if (e.key === 'Escape' && !$("wcard").hidden && $("wQuiz").hidden) $("wclose").click();
+});
 
 /* ---------- speech (Web Speech API, local OS voice) ---------- */
 function speak(text, slow){

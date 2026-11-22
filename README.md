@@ -4,9 +4,12 @@
 
 Built for **EvoHacks 2** (Nov 21–22, 2026) — theme: *Projects for Social Good*.
 
-> One in five readers shows dyslexic traits, and the families hit hardest are those
-> without money for tutors or specialist software. Lucid gives them a real reading
-> tool tonight: free forever, no account, no tracking, works offline.
+> One in five readers shows dyslexic traits — "perhaps as many as 15–20% of the
+> population" have some symptoms of dyslexia (International Dyslexia Association,
+> *Dyslexia Basics*, dyslexiaida.org/dyslexia-basics) — and the families hit
+> hardest are those without money for tutors or specialist software. Lucid gives
+> them a real reading tool tonight: free forever, no account, no tracking, works
+> offline.
 
 **Try it: open `index.html` in any browser.** That's the whole installation —
 one HTML file, zero dependencies, zero build step, no server.
@@ -74,6 +77,23 @@ node tests.js          # 16/16 syllabifier tests
 Or press **▶ Run 16 tests** inside the app — the same suite runs against the
 live page engine.
 
+## Verified, not just claimed
+
+Beyond the unit tests, we measured the engine against independent references
+on **8,892 unseen words** (the 10,000 most frequent English words):
+
+- **81.4% syllable-count agreement with CMUdict phonetics** (75.4% before a
+  silent-e rule fix the audit itself uncovered); 68.0% with pyphen's
+  orthographic hyphenation — see [`audit/`](audit/) for method, scripts,
+  raw results and documented failure classes.
+- **Offline verified two ways**: a static scan finds zero `fetch`/XHR/network
+  references in the source, and a live browser session interacting with every
+  feature recorded **zero network requests** (`performance.getEntriesByType`).
+- **Keyboard-verified in a real browser**: tab order starts at the skip link;
+  ESC closes the tour, the settings `<dialog>`, and the Word Workshop card;
+  ▲▼ keys move the focus line; all icon buttons carry labels; drill and toast
+  feedback use `aria-live`.
+
 ## Tech
 
 Single HTML file: vanilla HTML/CSS/JS, Web Speech API (progressive — the app works
@@ -83,9 +103,13 @@ without it), localStorage. Tested in Chromium; responsive to 390px phones.
 
 - The offline dictionary is small (~300 words); unknown words still get syllables
   and phonemes, but no definition.
-- Syllabification is rule-based English, not perfect phonology — strong on common
-  words (16 canonical cases locked by tests), transparent when it errs. The
-  exception list grows with real usage.
+- Syllabification is rule-based English, not perfect phonology: **measured at
+  81.4% syllable-count agreement with CMUdict phonetics on 8,892 unseen words**
+  (audit in [`audit/`](audit/), including failure classes). Known weak spots:
+  "-ed" endings, unstressed vowels ("business"), short-vowel VCV words
+  ("manage"). The exception list grows with real usage.
+- "Mastery" in *My Words* means **practice progress** (three successful drill
+  runs), not a validated learning outcome — we phrase it carefully on purpose.
 - Phonemes are rule-based approximations, not IPA-exact transcription.
 - Read-aloud highlighting depends on the browser's voices; it degrades gracefully.
 - Screen-reader support covers core flows (navigation, drill feedback), not full parity.
@@ -95,4 +119,6 @@ without it), localStorage. Tested in Chromium; responsive to 390px phones.
 Everything in this repo was built during the Nov 21–22, 2026 event window.
 The syllabification engine, all UI, tools, drills, tour, session tracking,
 before/after view, in-app test runner, and read-aloud karaoke were written at the
-hackathon. No pre-existing project code was used.
+hackathon. The unseen-word audit, the silent-e rule it uncovered, and the
+ESC-to-close accessibility fix also happened during the event. No
+pre-existing project code was used.
